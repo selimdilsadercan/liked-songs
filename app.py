@@ -65,31 +65,51 @@ def logout():
     # Clear our session
     session.clear()
     
-    # Redirect to Spotify's logout page, then return to our app
-    spotify_logout_url = "https://accounts.spotify.com/logout"
-    final_url = f"{spotify_logout_url}"
-    
     # Return HTML that logs out of Spotify and redirects back
-    return f"""
+    return """
         <script>
-            function logout() {{
-                // Clear any local storage
+            function completeLogout() {
+                // Clear all storage
                 localStorage.clear();
                 sessionStorage.clear();
                 
-                // Logout from Spotify
-                fetch('{spotify_logout_url}', {{
-                    mode: 'no-cors'
-                }}).finally(() => {{
-                    // Redirect to home page after a short delay
-                    setTimeout(() => {{
-                        window.location.href = '/?{time.time()}';
-                    }}, 1000);
-                }});
-            }}
-            logout();
+                // Clear all cookies
+                document.cookie.split(';').forEach(function(c) {
+                    document.cookie = c.trim().split('=')[0] + '=;' + 'expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/';
+                });
+                
+                // First, redirect to Spotify logout
+                window.location.href = 'https://accounts.spotify.com/en/logout';
+                
+                // After a delay, redirect back through Spotify login page to force re-auth
+                setTimeout(function() {
+                    window.location.href = 'https://accounts.spotify.com/en/login?continue=' + encodeURIComponent(window.location.origin + '/');
+                }, 1000);
+            }
+            completeLogout();
         </script>
-        <p>Logging out...</p>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+            .message { padding: 20px; }
+            .spinner { 
+                border: 4px solid #f3f3f3;
+                border-top: 4px solid #1DB954;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 20px auto;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+        <div class="message">
+            <h2>Logging out...</h2>
+            <div class="spinner"></div>
+            <p>Please wait while we complete the logout process.</p>
+        </div>
     """
 
 @app.route('/')
@@ -105,8 +125,38 @@ def index():
         auth_url += "&show_dialog=true"
         
         return f'''
-            <h1>Spotify Artist Analyzer</h1>
-            <a href="{auth_url}" style="display: inline-block; padding: 10px 20px; background-color: #1DB954; color: white; text-decoration: none; border-radius: 20px; margin: 10px 0;">Login with Spotify</a>
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ 
+                        font-family: Arial, sans-serif; 
+                        text-align: center; 
+                        margin-top: 50px;
+                        background-color: #f5f5f5;
+                    }}
+                    h1 {{ color: #333; }}
+                    .login-button {{
+                        display: inline-block;
+                        padding: 15px 30px;
+                        background-color: #1DB954;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 25px;
+                        font-size: 18px;
+                        margin: 20px 0;
+                        transition: background-color 0.3s;
+                    }}
+                    .login-button:hover {{
+                        background-color: #1ed760;
+                    }}
+                </style>
+            </head>
+            <body>
+                <h1>Spotify Artist Analyzer</h1>
+                <a href="{auth_url}" class="login-button">Login with Spotify</a>
+            </body>
+            </html>
         '''
     except Exception as e:
         app.logger.error(f"Error in index route: {str(e)}")
