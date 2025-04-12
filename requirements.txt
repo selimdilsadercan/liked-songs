@@ -1,0 +1,6 @@
+Flask==3.0.2
+spotipy==2.23.0
+python-dotenv==1.0.0
+pandas==2.1.0
+pyOpenSSL==24.0.0
+gunicorn==21.2.0 
