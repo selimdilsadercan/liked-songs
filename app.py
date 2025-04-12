@@ -7,6 +7,7 @@ import pandas as pd
 import json
 from urllib.parse import urlencode
 import secrets
+import time
 
 # Load environment variables - only in development
 if os.path.exists('.env'):
@@ -38,18 +39,42 @@ def create_spotify_oauth():
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
-        scope=SCOPE
+        scope=SCOPE,
+        cache_handler=None  # Disable token caching
     )
+
+def get_token():
+    token_info = session.get('token_info', None)
+    if not token_info:
+        return None
+    
+    now = int(time.time())
+    is_expired = token_info['expires_at'] - now < 60
+    
+    if is_expired:
+        sp_oauth = create_spotify_oauth()
+        token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
+        session['token_info'] = token_info
+    
+    return token_info
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
 
 @app.route('/')
 def index():
     try:
+        # Clear any existing session
+        session.clear()
+        
         # Generate the Spotify login URL
         sp_oauth = create_spotify_oauth()
         auth_url = sp_oauth.get_authorize_url()
         return f'''
             <h1>Spotify Artist Analyzer</h1>
-            <a href="{auth_url}">Login with Spotify</a>
+            <a href="{auth_url}" style="display: inline-block; padding: 10px 20px; background-color: #1DB954; color: white; text-decoration: none; border-radius: 20px; margin: 10px 0;">Login with Spotify</a>
         '''
     except Exception as e:
         app.logger.error(f"Error in index route: {str(e)}")
@@ -110,11 +135,15 @@ def analyze_artists(liked_songs):
 @app.route('/analyze')
 def analyze():
     try:
-        token_info = session.get("token_info", None)
+        token_info = get_token()
         if not token_info:
             return redirect(url_for('index'))
         
         sp = spotipy.Spotify(auth=token_info['access_token'])
+        
+        # Get user info to display
+        user_info = sp.current_user()
+        user_name = user_info['display_name']
         
         # Get liked songs
         liked_songs = get_liked_songs(sp)
@@ -128,17 +157,26 @@ def analyze():
         # Create HTML output with improved styling
         html_output = """
         <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            table { border-collapse: collapse; width: 100%; max-width: 800px; }
+            body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+            table { border-collapse: collapse; width: 100%; max-width: 800px; background-color: white; }
             th, td { padding: 12px; text-align: left; border: 1px solid #ddd; }
-            th { background-color: #4CAF50; color: white; }
-            tr:nth-child(even) { background-color: #f2f2f2; }
-            tr:hover { background-color: #ddd; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .back-link { margin-top: 20px; display: block; }
+            th { background-color: #1DB954; color: white; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            tr:hover { background-color: #f1f1f1; }
+            .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+            .button { display: inline-block; padding: 10px 20px; background-color: #1DB954; color: white; 
+                     text-decoration: none; border-radius: 20px; }
+            .user-info { color: #333; }
         </style>
         <div class="container">
-            <h1>Your Most Listened Artists</h1>
+            <div class="header">
+                <h1>Your Most Listened Artists</h1>
+                <div class="user-info">
+                    <p>Logged in as: """ + user_name + """</p>
+                    <a href="/logout" class="button">Logout</a>
+                </div>
+            </div>
         """
         
         html_output += "<table>"
@@ -153,7 +191,6 @@ def analyze():
         
         html_output += "</table>"
         html_output += f"<p>Total number of liked songs: {len(liked_songs)}</p>"
-        html_output += '<a href="/" class="back-link">Back to Home</a>'
         html_output += "</div>"
         
         return html_output
