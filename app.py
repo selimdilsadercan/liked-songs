@@ -23,10 +23,10 @@ app.config.update(
 )
 
 # Spotify API credentials
-CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
-CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+CLIENT_ID = "6919a60a626649ac92d20341b1445ac1"
+CLIENT_SECRET = "6919a60a626649ac92d20341b1445ac1"
 # Use environment variable for redirect URI or default to localhost
-REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'https://localhost:5000/callback')
+REDIRECT_URI = "https://liked-songs.onrender.com/callback"
 SCOPE = 'user-library-read'
 
 def create_spotify_oauth():
