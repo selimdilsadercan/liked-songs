@@ -8,8 +8,9 @@ import json
 from urllib.parse import urlencode
 import secrets
 
-# Load environment variables
-load_dotenv()
+# Load environment variables - only in development
+if os.path.exists('.env'):
+    load_dotenv()
 
 app = Flask(__name__)
 # Generate a secure random secret key
@@ -23,10 +24,13 @@ app.config.update(
 )
 
 # Spotify API credentials
-CLIENT_ID = "6919a60a626649ac92d20341b1445ac1"
-CLIENT_SECRET = "6919a60a626649ac92d20341b1445ac1"
-# Use environment variable for redirect URI or default to localhost
-REDIRECT_URI = "https://liked-songs.onrender.com/callback"
+CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+REDIRECT_URI = os.getenv('REDIRECT_URI', 'https://liked-songs.onrender.com/callback')
+
+if not CLIENT_ID or not CLIENT_SECRET:
+    raise ValueError("Missing Spotify API credentials. Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.")
+
 SCOPE = 'user-library-read'
 
 def create_spotify_oauth():
@@ -39,22 +43,34 @@ def create_spotify_oauth():
 
 @app.route('/')
 def index():
-    # Generate the Spotify login URL
-    sp_oauth = create_spotify_oauth()
-    auth_url = sp_oauth.get_authorize_url()
-    return f'''
-        <h1>Spotify Artist Analyzer</h1>
-        <a href="{auth_url}">Login with Spotify</a>
-    '''
+    try:
+        # Generate the Spotify login URL
+        sp_oauth = create_spotify_oauth()
+        auth_url = sp_oauth.get_authorize_url()
+        return f'''
+            <h1>Spotify Artist Analyzer</h1>
+            <a href="{auth_url}">Login with Spotify</a>
+        '''
+    except Exception as e:
+        app.logger.error(f"Error in index route: {str(e)}")
+        return f"An error occurred: {str(e)}", 500
 
 @app.route('/callback')
 def callback():
-    sp_oauth = create_spotify_oauth()
-    session.clear()
-    code = request.args.get('code')
-    token_info = sp_oauth.get_access_token(code)
-    session["token_info"] = token_info
-    return redirect(url_for('analyze'))
+    try:
+        sp_oauth = create_spotify_oauth()
+        session.clear()
+        code = request.args.get('code')
+        if not code:
+            app.logger.error("No code provided in callback")
+            return "Authorization code not found", 400
+            
+        token_info = sp_oauth.get_access_token(code)
+        session["token_info"] = token_info
+        return redirect(url_for('analyze'))
+    except Exception as e:
+        app.logger.error(f"Error in callback route: {str(e)}")
+        return f"An error occurred during authentication: {str(e)}", 500
 
 def get_liked_songs(sp):
     """Fetch all liked songs from Spotify"""
