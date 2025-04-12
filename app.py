@@ -27,7 +27,15 @@ app.config.update(
 # Spotify API credentials
 CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
-REDIRECT_URI = os.getenv('REDIRECT_URI', 'https://liked-songs.onrender.com/callback')
+
+# Set the redirect URI based on environment
+if os.getenv('FLASK_ENV') == 'development':
+    REDIRECT_URI = 'https://localhost:5000/callback'
+else:
+    REDIRECT_URI = 'https://liked-songs.onrender.com/callback'
+
+# Override with environment variable if set
+REDIRECT_URI = os.getenv('REDIRECT_URI', REDIRECT_URI)
 
 if not CLIENT_ID or not CLIENT_SECRET:
     raise ValueError("Missing Spotify API credentials. Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.")
@@ -42,7 +50,9 @@ def create_spotify_oauth():
         redirect_uri=REDIRECT_URI,
         scope=SCOPE,
         cache_handler=None,  # Disable token caching
-        show_dialog=True  # Always show the authorization dialog
+        show_dialog=True,  # Always show the authorization dialog
+        requests_session=None,  # Don't reuse sessions
+        requests_timeout=None  # Don't cache requests
     )
 
 def get_token():
@@ -60,57 +70,94 @@ def get_token():
     
     return token_info
 
-@app.route('/logout')
-def logout():
-    # Clear our session
+@app.route('/force-logout')
+def force_logout():
+    # Clear Flask session
     session.clear()
     
-    # Return HTML that logs out of Spotify and redirects back
-    return """
-        <script>
-            function completeLogout() {
-                // Clear all storage
-                localStorage.clear();
-                sessionStorage.clear();
+    # Get the base URL for the app
+    base_url = request.url_root.rstrip('/')
+    
+    return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
+                .message {{ padding: 20px; }}
+                .spinner {{ 
+                    border: 4px solid #f3f3f3;
+                    border-top: 4px solid #1DB954;
+                    border-radius: 50%;
+                    width: 40px;
+                    height: 40px;
+                    animation: spin 1s linear infinite;
+                    margin: 20px auto;
+                }}
+                @keyframes spin {{
+                    0% {{ transform: rotate(0deg); }}
+                    100% {{ transform: rotate(360deg); }}
+                }}
+            </style>
+            <script>
+                async function forceLogout() {{
+                    // Clear all browser storage
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    
+                    // Clear all cookies
+                    const cookies = document.cookie.split(';');
+                    for (let cookie of cookies) {{
+                        const name = cookie.split('=')[0].trim();
+                        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=' + window.location.hostname;
+                        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.spotify.com';
+                    }}
+                    
+                    try {{
+                        // First logout from Spotify
+                        await fetch('https://accounts.spotify.com/en/logout', {{
+                            method: 'GET',
+                            mode: 'no-cors'
+                        }});
+                        
+                        // Wait a bit
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        // Redirect to Spotify login with force_login parameter
+                        const spotifyUrl = new URL('https://accounts.spotify.com/authorize');
+                        spotifyUrl.searchParams.append('response_type', 'code');
+                        spotifyUrl.searchParams.append('client_id', '{CLIENT_ID}');
+                        spotifyUrl.searchParams.append('scope', '{SCOPE}');
+                        spotifyUrl.searchParams.append('redirect_uri', '{REDIRECT_URI}');
+                        spotifyUrl.searchParams.append('show_dialog', 'true');
+                        spotifyUrl.searchParams.append('force_login', 'true');
+                        
+                        window.location.href = spotifyUrl.toString();
+                    }} catch (error) {{
+                        console.error('Logout error:', error);
+                        // If anything fails, redirect to home
+                        window.location.href = '{base_url}';
+                    }}
+                }}
                 
-                // Clear all cookies
-                document.cookie.split(';').forEach(function(c) {
-                    document.cookie = c.trim().split('=')[0] + '=;' + 'expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/';
-                });
-                
-                // First, redirect to Spotify logout
-                window.location.href = 'https://accounts.spotify.com/en/logout';
-                
-                // After a delay, redirect back through Spotify login page to force re-auth
-                setTimeout(function() {
-                    window.location.href = 'https://accounts.spotify.com/en/login?continue=' + encodeURIComponent(window.location.origin + '/');
-                }, 1000);
-            }
-            completeLogout();
-        </script>
-        <style>
-            body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
-            .message { padding: 20px; }
-            .spinner { 
-                border: 4px solid #f3f3f3;
-                border-top: 4px solid #1DB954;
-                border-radius: 50%;
-                width: 40px;
-                height: 40px;
-                animation: spin 1s linear infinite;
-                margin: 20px auto;
-            }
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-        </style>
-        <div class="message">
-            <h2>Logging out...</h2>
-            <div class="spinner"></div>
-            <p>Please wait while we complete the logout process.</p>
-        </div>
+                // Start the logout process
+                forceLogout();
+            </script>
+        </head>
+        <body>
+            <div class="message">
+                <h2>Logging out...</h2>
+                <div class="spinner"></div>
+                <p>Please wait while we complete the logout process.</p>
+            </div>
+        </body>
+        </html>
     """
+
+# Update the regular logout to use the force-logout
+@app.route('/logout')
+def logout():
+    return redirect(url_for('force_logout'))
 
 @app.route('/')
 def index():
@@ -118,11 +165,10 @@ def index():
         # Clear any existing session
         session.clear()
         
-        # Generate the Spotify login URL with force_login parameter
+        # Generate the Spotify login URL with force parameters
         sp_oauth = create_spotify_oauth()
         auth_url = sp_oauth.get_authorize_url()
-        # Add show_dialog=true to force account selection
-        auth_url += "&show_dialog=true"
+        auth_url += "&show_dialog=true&force_login=true"
         
         return f'''
             <!DOCTYPE html>
@@ -235,7 +281,7 @@ def error():
             <li>The redirect URI matches exactly</li>
         </ul>
         <a href="/" class="back-button">Try Again</a>
-    </div>
+    </div>  
     """
 
 @app.route('/analyze')
