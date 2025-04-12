@@ -32,7 +32,8 @@ REDIRECT_URI = os.getenv('REDIRECT_URI', 'https://liked-songs.onrender.com/callb
 if not CLIENT_ID or not CLIENT_SECRET:
     raise ValueError("Missing Spotify API credentials. Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.")
 
-SCOPE = 'user-library-read'
+# Update scopes to include necessary permissions
+SCOPE = 'user-library-read user-read-private user-read-email'
 
 def create_spotify_oauth():
     return SpotifyOAuth(
@@ -40,7 +41,8 @@ def create_spotify_oauth():
         client_secret=CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
         scope=SCOPE,
-        cache_handler=None  # Disable token caching
+        cache_handler=None,  # Disable token caching
+        show_dialog=True  # Always show the authorization dialog
     )
 
 def get_token():
@@ -162,6 +164,30 @@ def analyze_artists(liked_songs):
     
     return analysis
 
+@app.route('/error')
+def error():
+    error_msg = request.args.get('message', 'An unknown error occurred')
+    return f"""
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+        .error-container {{ max-width: 600px; margin: 50px auto; padding: 20px; background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .error-title {{ color: #e74c3c; margin-top: 0; }}
+        .error-message {{ color: #666; }}
+        .back-button {{ display: inline-block; padding: 10px 20px; background-color: #1DB954; color: white; text-decoration: none; border-radius: 20px; margin-top: 20px; }}
+    </style>
+    <div class="error-container">
+        <h1 class="error-title">Error</h1>
+        <p class="error-message">{error_msg}</p>
+        <p class="error-message">Please make sure:</p>
+        <ul class="error-message">
+            <li>You are registered as a user in the Spotify Developer Dashboard</li>
+            <li>The app settings in the Spotify Developer Dashboard are correct</li>
+            <li>The redirect URI matches exactly</li>
+        </ul>
+        <a href="/" class="back-button">Try Again</a>
+    </div>
+    """
+
 @app.route('/analyze')
 def analyze():
     try:
@@ -171,12 +197,20 @@ def analyze():
         
         sp = spotipy.Spotify(auth=token_info['access_token'])
         
-        # Get user info to display
-        user_info = sp.current_user()
-        user_name = user_info['display_name']
+        try:
+            # Get user info to display
+            user_info = sp.current_user()
+            user_name = user_info['display_name']
+        except spotipy.exceptions.SpotifyException as e:
+            error_message = "Failed to access Spotify. Please make sure you're registered in the Spotify Developer Dashboard."
+            return redirect(url_for('error', message=error_message))
         
         # Get liked songs
-        liked_songs = get_liked_songs(sp)
+        try:
+            liked_songs = get_liked_songs(sp)
+        except spotipy.exceptions.SpotifyException as e:
+            error_message = "Failed to fetch liked songs. Please check your Spotify permissions."
+            return redirect(url_for('error', message=error_message))
         
         if not liked_songs:
             return "No liked songs found!"
@@ -226,7 +260,10 @@ def analyze():
         return html_output
         
     except Exception as e:
-        return f"An error occurred: {str(e)}"
+        error_message = str(e)
+        if "http status: 403" in error_message:
+            error_message = "Access denied. Please make sure you're registered in the Spotify Developer Dashboard."
+        return redirect(url_for('error', message=error_message))
 
 if __name__ == '__main__':
     # Development server
