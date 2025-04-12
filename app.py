@@ -60,8 +60,35 @@ def get_token():
 
 @app.route('/logout')
 def logout():
+    # Clear our session
     session.clear()
-    return redirect(url_for('index'))
+    
+    # Redirect to Spotify's logout page, then return to our app
+    spotify_logout_url = "https://accounts.spotify.com/logout"
+    final_url = f"{spotify_logout_url}"
+    
+    # Return HTML that logs out of Spotify and redirects back
+    return f"""
+        <script>
+            function logout() {{
+                // Clear any local storage
+                localStorage.clear();
+                sessionStorage.clear();
+                
+                // Logout from Spotify
+                fetch('{spotify_logout_url}', {{
+                    mode: 'no-cors'
+                }}).finally(() => {{
+                    // Redirect to home page after a short delay
+                    setTimeout(() => {{
+                        window.location.href = '/?{time.time()}';
+                    }}, 1000);
+                }});
+            }}
+            logout();
+        </script>
+        <p>Logging out...</p>
+    """
 
 @app.route('/')
 def index():
@@ -69,9 +96,12 @@ def index():
         # Clear any existing session
         session.clear()
         
-        # Generate the Spotify login URL
+        # Generate the Spotify login URL with force_login parameter
         sp_oauth = create_spotify_oauth()
         auth_url = sp_oauth.get_authorize_url()
+        # Add show_dialog=true to force account selection
+        auth_url += "&show_dialog=true"
+        
         return f'''
             <h1>Spotify Artist Analyzer</h1>
             <a href="{auth_url}" style="display: inline-block; padding: 10px 20px; background-color: #1DB954; color: white; text-decoration: none; border-radius: 20px; margin: 10px 0;">Login with Spotify</a>
